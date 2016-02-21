@@ -2,10 +2,10 @@
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace dnSpy {
+namespace dnSpy.Images {
 	// Fixes the VS2013 images to work with any theme. Same algo as VS2015 itself uses...
-	public static class ThemedImageCreator {
-		public struct HslColor {
+	static class ThemedImageCreator {
+		struct HslColor {
 			public readonly double Hue;
 			public readonly double Saturation;
 			public readonly double Luminosity;
@@ -61,7 +61,7 @@ namespace dnSpy {
 				}
 			}
 
-			private static double ModOne(double value) {
+			static double ModOne(double value) {
 				unchecked {
 					if (value < 0.0)
 						return value + 1.0;
@@ -71,7 +71,7 @@ namespace dnSpy {
 				}
 			}
 
-			private static double ComputeRGBComponent(double p, double q, double tC) {
+			static double ComputeRGBComponent(double p, double q, double tC) {
 				unchecked {
 					if (tC < 1.0 / 6.0)
 						return p + (q - p) * 6.0 * tC;

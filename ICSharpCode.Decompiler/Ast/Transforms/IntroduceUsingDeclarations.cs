@@ -21,7 +21,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using dnlib.DotNet;
-using dnSpy.NRefactory;
+using dnSpy.Decompiler.Shared;
 using ICSharpCode.NRefactory.CSharp;
 
 namespace ICSharpCode.Decompiler.Ast.Transforms {
@@ -50,15 +50,15 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 					// we go backwards (OrderByDescending) through the list of namespaces because we insert them backwards
 					// (always inserting at the start of the list)
 					string[] parts = ns.Split('.');
-					AstType nsType = new SimpleType(parts[0]).WithAnnotation(TextTokenType.NamespacePart);
+					AstType nsType = new SimpleType(parts[0]).WithAnnotation(TextTokenKind.NamespacePart);
 					for (int i = 1; i < parts.Length; i++) {
-						nsType = new MemberType { Target = nsType, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenType.NamespacePart) }.WithAnnotation(TextTokenType.NamespacePart);
+						nsType = new MemberType { Target = nsType, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenKind.NamespacePart) }.WithAnnotation(TextTokenKind.NamespacePart);
 					}
 					compilationUnit.InsertChildAfter(null, new UsingDeclaration { Import = nsType }, SyntaxTree.MemberRole);
 				}
 			}
 			
-			if (!context.Settings.FullyQualifyAmbiguousTypeNames)
+			if (!context.Settings.FullyQualifyAmbiguousTypeNames && !context.Settings.FullyQualifyAllTypes)
 				return;
 
 			if (context.CurrentModule != null) {
@@ -384,17 +384,17 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 				if (tr != null && IsAmbiguous(tr.Namespace, tr.Name)) {
 					AstType ns;
 					if (string.IsNullOrEmpty(tr.Namespace)) {
-						ns = new SimpleType("global").WithAnnotation(TextTokenType.Keyword);
+						ns = new SimpleType("global").WithAnnotation(TextTokenKind.Keyword);
 					} else {
 						string[] parts = tr.Namespace.Split('.');
 						if (IsAmbiguous(string.Empty, parts[0])) {
 							// conflict between namespace and type name/member name
-							ns = new MemberType { Target = new SimpleType("global").WithAnnotation(TextTokenType.Keyword), IsDoubleColon = true, MemberNameToken = Identifier.Create(parts[0]).WithAnnotation(TextTokenType.NamespacePart) }.WithAnnotation(TextTokenType.NamespacePart);
+							ns = new MemberType { Target = new SimpleType("global").WithAnnotation(TextTokenKind.Keyword), IsDoubleColon = true, MemberNameToken = Identifier.Create(parts[0]).WithAnnotation(TextTokenKind.NamespacePart) }.WithAnnotation(TextTokenKind.NamespacePart);
 						} else {
-							ns = new SimpleType(parts[0]).WithAnnotation(TextTokenType.NamespacePart);
+							ns = new SimpleType(parts[0]).WithAnnotation(TextTokenKind.NamespacePart);
 						}
 						for (int i = 1; i < parts.Length; i++) {
-							ns = new MemberType { Target = ns, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenType.NamespacePart) }.WithAnnotation(TextTokenType.NamespacePart);
+							ns = new MemberType { Target = ns, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenKind.NamespacePart) }.WithAnnotation(TextTokenKind.NamespacePart);
 						}
 					}
 					MemberType mt = new MemberType();
@@ -418,6 +418,8 @@ namespace ICSharpCode.Decompiler.Ast.Transforms {
 			
 			bool IsAmbiguous(string ns, string name)
 			{
+				if (transform.context.Settings.FullyQualifyAllTypes)
+					return true;
 				// If the type name conflicts with an inner class/type parameter, we need to fully-qualify it:
 				if (currentMemberTypes != null && currentMemberTypes.Contains(name))
 					return true;

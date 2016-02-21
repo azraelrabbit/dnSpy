@@ -24,6 +24,7 @@ using ICSharpCode.Decompiler.ILAst;
 using ICSharpCode.NRefactory.CSharp;
 using ICSharpCode.NRefactory.PatternMatching;
 using dnlib.DotNet;
+using dnSpy.Decompiler.Shared;
 
 namespace ICSharpCode.Decompiler.Ast.Transforms
 {
@@ -159,7 +160,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 		
 		void RemoveSingleEmptyConstructor(TypeDeclaration typeDeclaration)
 		{
-			if (!context.Settings.RemoveEmptyDefaultConstructors)
+			if (!context.Settings.RemoveEmptyDefaultConstructors || context.Settings.ForceShowAllMembers)
 				return;
 			var instanceCtors = typeDeclaration.Members.OfType<ConstructorDeclaration>().Where(c => (c.Modifiers & Modifiers.Static) == 0).ToArray();
 			if (instanceCtors.Length == 1) {

@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -442,9 +442,9 @@ namespace dndbg.Engine {
 											WriteNumber(dims[i]);
 										else {
 											//TODO: How does VS print these arrays?
-											WriteNumber((int)indexes[0]);
+											WriteNumber((int)indexes[i]);
 											OutputWrite("..", TypeColor.Operator);
-											WriteNumber((int)(indexes[0] + dims[0]));
+											WriteNumber((int)(indexes[i] + dims[i]));
 										}
 									}
 								}
@@ -655,7 +655,6 @@ namespace dndbg.Engine {
 					else {
 						Write(gis.GenericType, typeGenArgs, methGenArgs);
 						OutputWrite("<", TypeColor.Operator);
-						var emptyList = new List<CorType>();
 						for (int i = 0; i < gis.GenericArguments.Count; i++) {
 							if (i > 0)
 								WriteCommaSpace();
@@ -883,9 +882,8 @@ namespace dndbg.Engine {
 						uint ip = frame.NativeFrameIP;
 						if (nativeCode != null && !nativeCode.IsIL)
 							WriteNativeAddress(nativeCode.Address);
-						else {
+						else
 							OutputWrite("???", TypeColor.Error);
-						}
 						WriteRelativeOffset((int)ip);
 					}
 					OutputWrite(")", TypeColor.Operator);
@@ -1248,6 +1246,10 @@ namespace dndbg.Engine {
 						return;
 					}
 					var rv = res.Value.ResultOrException;
+					if (rv != null && rv.IsNull) {
+						WriteTypeOfValue(value);
+						return;
+					}
 					if (rv != null && rv.IsReference)
 						rv = rv.NeuterCheckDereferencedValue;
 					if (rv == null || !rv.IsString) {

@@ -50,7 +50,7 @@ namespace ICSharpCode.TreeView
 				if (removedNodes != null) {
 					var flattener = GetListRoot().treeFlattener;
 					if (flattener != null) {
-						flattener.NodesRemoved(GetVisibleIndexForNode(this, flattener.version), removedNodes);
+						flattener.NodesRemoved(GetVisibleIndexForNode(this), removedNodes);
 						foreach (var n in removedNodes)
 							n.OnIsVisibleChanged();
 					}
@@ -59,7 +59,7 @@ namespace ICSharpCode.TreeView
 				if (updateFlattener && newIsVisible) {
 					var flattener = GetListRoot().treeFlattener;
 					if (flattener != null) {
-						flattener.NodesInserted(GetVisibleIndexForNode(this, flattener.version), VisibleDescendantsAndSelf());
+						flattener.NodesInserted(GetVisibleIndexForNode(this), VisibleDescendantsAndSelf());
 						foreach (var n in VisibleDescendantsAndSelf())
 							n.OnIsVisibleChanged();
 					}
@@ -172,14 +172,12 @@ namespace ICSharpCode.TreeView
 		internal protected virtual void OnChildrenChanged(NotifyCollectionChangedEventArgs e)
 		{
 			var flattener = GetListRoot().treeFlattener;
-			if (flattener != null)
-				flattener.version++;
 
 			if (e.OldItems != null) {
 				foreach (SharpTreeNode node in e.OldItems) {
 					Debug.Assert(node.modelParent == this);
 					node.modelParent = null;
-					Debug.WriteLine("Removing {0} from {1}", node, this);
+					//Debug.WriteLine("Removing {0} from {1}", node, this);
 					SharpTreeNode removeEnd = node;
 					while (removeEnd.modelChildren != null && removeEnd.modelChildren.Count > 0)
 						removeEnd = removeEnd.modelChildren.Last();
@@ -187,7 +185,7 @@ namespace ICSharpCode.TreeView
 					List<SharpTreeNode> removedNodes = null;
 					int visibleIndexOfRemoval = 0;
 					if (node.isVisible) {
-						visibleIndexOfRemoval = GetVisibleIndexForNode(node, flattener.version);
+						visibleIndexOfRemoval = GetVisibleIndexForNode(node);
 						removedNodes = node.VisibleDescendantsAndSelf().ToList();
 					}
 					
@@ -221,7 +219,7 @@ namespace ICSharpCode.TreeView
 					insertionPos = node;
 					if (node.isVisible) {
 						if (flattener != null) {
-							flattener.NodesInserted(GetVisibleIndexForNode(node, flattener.version), node.VisibleDescendantsAndSelf());
+							flattener.NodesInserted(GetVisibleIndexForNode(node), node.VisibleDescendantsAndSelf());
 						}
 					}
 				}

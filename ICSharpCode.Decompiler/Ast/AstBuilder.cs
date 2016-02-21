@@ -23,8 +23,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using dnlib.DotNet;
-using dnSpy.Decompiler;
-using dnSpy.NRefactory;
+using dnSpy.Decompiler.Shared;
 using ICSharpCode.Decompiler.Ast.Transforms;
 using ICSharpCode.Decompiler.ILAst;
 using ICSharpCode.NRefactory.CSharp;
@@ -40,7 +39,8 @@ namespace ICSharpCode.Decompiler.Ast {
 		None = 0,
 		IncludeNamespace = 1,
 		IncludeTypeParameterDefinitions = 2,
-		DoNotUsePrimitiveTypeNames = 4
+		DoNotUsePrimitiveTypeNames = 4,
+		DoNotIncludeEnclosingType = 8,
 	}
 	
 	public class AstBuilder
@@ -60,18 +60,20 @@ namespace ICSharpCode.Decompiler.Ast {
 		
 		public static bool MemberIsHidden(IMemberRef member, DecompilerSettings settings)
 		{
-			if (settings.ForceShowAllMembers)
-				return false;
 			MethodDef method = member as MethodDef;
 			if (method != null) {
 				if (method.IsGetter || method.IsSetter || method.IsAddOn || method.IsRemoveOn)
 					return true;
+				if (settings.ForceShowAllMembers)
+					return false;
 				if (settings.AnonymousMethods && method.HasGeneratedName() && method.IsCompilerGenerated())
 					return true;
 			}
 
 			TypeDef type = member as TypeDef;
 			if (type != null) {
+				if (settings.ForceShowAllMembers)
+					return false;
 				if (type.DeclaringType != null) {
 					if (settings.AnonymousMethods && IsClosureType(type))
 						return true;
@@ -89,6 +91,8 @@ namespace ICSharpCode.Decompiler.Ast {
 			
 			FieldDef field = member as FieldDef;
 			if (field != null) {
+				if (settings.ForceShowAllMembers)
+					return false;
 				if (field.IsCompilerGenerated()) {
 					if (settings.AnonymousMethods && IsAnonymousMethodCacheField(field))
 						return true;
@@ -468,7 +472,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			MemberType mType = type as MemberType;
 			if (sType != null) {
 				while (typeDef.GenericParameters.Count > sType.TypeArguments.Count) {
-					sType.TypeArguments.Add(new SimpleType("").WithAnnotation(TextTokenType.TypeGenericParameter).WithAnnotation(SimpleType.DummyTypeGenericParam));
+					sType.TypeArguments.Add(new SimpleType("").WithAnnotation(TextTokenKind.TypeGenericParameter).WithAnnotation(SimpleType.DummyTypeGenericParam));
 				}
 			}
 			
@@ -478,7 +482,7 @@ namespace ICSharpCode.Decompiler.Ast {
 				int outerTypeParamCount = typeDef.DeclaringType == null ? 0 : typeDef.DeclaringType.GenericParameters.Count;
 				
 				while (typeDef.GenericParameters.Count - outerTypeParamCount > mType.TypeArguments.Count) {
-					mType.TypeArguments.Add(new SimpleType("").WithAnnotation(TextTokenType.TypeGenericParameter).WithAnnotation(SimpleType.DummyTypeGenericParam));
+					mType.TypeArguments.Add(new SimpleType("").WithAnnotation(TextTokenKind.TypeGenericParameter).WithAnnotation(SimpleType.DummyTypeGenericParam));
 				}
 			}
 			
@@ -573,7 +577,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			if (ts != null && !(ts.TypeSig is FnPtrSig))
 				return ConvertType(ts.TypeSig, typeAttributes, ref typeIndex, options, depth);
 
-			if (type.DeclaringType != null) {
+			if (type.DeclaringType != null && (options & ConvertTypeOptions.DoNotIncludeEnclosingType) == 0) {
 				AstType typeRef = ConvertType(type.DeclaringType, typeAttributes, ref typeIndex, options & ~ConvertTypeOptions.IncludeTypeParameterDefinitions, depth);
 				string namepart = ICSharpCode.NRefactory.TypeSystem.ReflectionHelper.SplitTypeParameterCountFromReflectionName(type.Name);
 				MemberType memberType = new MemberType { Target = typeRef, MemberNameToken = Identifier.Create(namepart).WithAnnotation(type) };
@@ -638,9 +642,9 @@ namespace ICSharpCode.Decompiler.Ast {
 					AstType astType;
 					if ((options & ConvertTypeOptions.IncludeNamespace) == ConvertTypeOptions.IncludeNamespace && ns.Length > 0) {
 						string[] parts = ns.Split('.');
-						AstType nsType = new SimpleType(parts[0]).WithAnnotation(TextTokenType.NamespacePart);
+						AstType nsType = new SimpleType(parts[0]).WithAnnotation(TextTokenKind.NamespacePart);
 						for (int i = 1; i < parts.Length; i++) {
-							nsType = new MemberType { Target = nsType, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenType.NamespacePart) }.WithAnnotation(TextTokenType.NamespacePart);
+							nsType = new MemberType { Target = nsType, MemberNameToken = Identifier.Create(parts[i]).WithAnnotation(TextTokenKind.NamespacePart) }.WithAnnotation(TextTokenKind.NamespacePart);
 						}
 						astType = new MemberType { Target = nsType, MemberNameToken = Identifier.Create(name).WithAnnotation(type) };
 					} else {
@@ -811,6 +815,7 @@ namespace ICSharpCode.Decompiler.Ast {
 		
 		void AddTypeMembers(TypeDeclaration astType, TypeDef typeDef)
 		{
+			bool hasShownMethods = false;
 			foreach (var d in this.context.Settings.DecompilationObjects) {
 				switch (d) {
 				case DecompilationObject.NestedTypes:
@@ -824,13 +829,20 @@ namespace ICSharpCode.Decompiler.Ast {
 					break;
 
 				case DecompilationObject.Fields:
-					foreach (FieldDef fieldDef in typeDef.GetFields(typeDef.IsAutoLayout ? context.Settings.SortMembers : false)) {
+					foreach (FieldDef fieldDef in typeDef.GetFields(context.Settings.SortMembers)) {
 						if (MemberIsHidden(fieldDef, context.Settings)) continue;
 						astType.AddChild(CreateField(fieldDef), Roles.TypeMemberRole);
 					}
 					break;
 
 				case DecompilationObject.Events:
+					if (hasShownMethods)
+						break;
+					if (!typeDef.CanSortMethods()) {
+						ShowAllMethods(astType, typeDef);
+						hasShownMethods = true;
+						break;
+					}
 					foreach (EventDef eventDef in typeDef.GetEvents(context.Settings.SortMembers)) {
 						if (eventDef.AddMethod == null && eventDef.RemoveMethod == null)
 							continue;
@@ -839,6 +851,13 @@ namespace ICSharpCode.Decompiler.Ast {
 					break;
 
 				case DecompilationObject.Properties:
+					if (hasShownMethods)
+						break;
+					if (!typeDef.CanSortMethods()) {
+						ShowAllMethods(astType, typeDef);
+						hasShownMethods = true;
+						break;
+					}
 					foreach (PropertyDef propDef in typeDef.GetProperties(context.Settings.SortMembers)) {
 						if (propDef.GetMethod == null && propDef.SetMethod == null)
 							continue;
@@ -847,7 +866,14 @@ namespace ICSharpCode.Decompiler.Ast {
 					break;
 
 				case DecompilationObject.Methods:
-					foreach (MethodDef methodDef in typeDef.GetMethods(typeDef.IsInterface ? false : context.Settings.SortMembers)) {
+					if (hasShownMethods)
+						break;
+					if (!typeDef.CanSortMethods()) {
+						ShowAllMethods(astType, typeDef);
+						hasShownMethods = true;
+						break;
+					}
+					foreach (MethodDef methodDef in typeDef.GetMethods(context.Settings.SortMembers)) {
 						if (MemberIsHidden(methodDef, context.Settings)) continue;
 
 						if (methodDef.IsConstructor)
@@ -862,6 +888,40 @@ namespace ICSharpCode.Decompiler.Ast {
 			}
 		}
 
+		void ShowAllMethods(TypeDeclaration astType, TypeDef type)
+		{
+			foreach (var def in type.GetNonSortedMethodsPropsEvents()) {
+				var md = def as MethodDef;
+				if (md != null) {
+					if (MemberIsHidden(md, context.Settings))
+						continue;
+					if (md.IsConstructor)
+						astType.Members.Add(CreateConstructor(md));
+					else
+						astType.Members.Add(CreateMethod(md));
+					continue;
+				}
+
+				var pd = def as PropertyDef;
+				if (pd != null) {
+					if (pd.GetMethod == null && pd.SetMethod == null)
+						continue;
+					astType.Members.Add(CreateProperty(pd));
+					continue;
+				}
+
+				var ed = def as EventDef;
+				if (ed != null) {
+					if (ed.AddMethod == null && ed.RemoveMethod == null)
+						continue;
+					astType.AddChild(CreateEvent(ed), Roles.TypeMemberRole);
+					continue;
+				}
+
+				Debug.Fail("Shouldn't be here");
+			}
+		}
+
 		EntityDeclaration CreateMethod(MethodDef methodDef)
 		{
 			MethodDeclaration astMethod = new MethodDeclaration();
@@ -870,6 +930,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			astMethod.NameToken = Identifier.Create(CleanName(methodDef.Name)).WithAnnotation(methodDef);
 			astMethod.TypeParameters.AddRange(MakeTypeParameters(methodDef.GenericParameters));
 			astMethod.Parameters.AddRange(MakeParameters(methodDef));
+			bool createMethodBody = false;
 			// constraints for override and explicit interface implementation methods are inherited from the base method, so they cannot be specified directly
 			if (!methodDef.IsVirtual || (methodDef.IsNewSlot && !methodDef.IsPrivate)) astMethod.Constraints.AddRange(MakeConstraints(methodDef.GenericParameters));
 			if (!methodDef.DeclaringType.IsInterface) {
@@ -881,6 +942,13 @@ namespace ICSharpCode.Decompiler.Ast {
 					if (methodDef.IsVirtual == methodDef.IsNewSlot)
 						SetNewModifier(astMethod);
 				}
+				createMethodBody = true;
+			} else if (methodDef.IsStatic) {
+				// decompile static method in interface
+				astMethod.Modifiers = ConvertModifiers(methodDef);
+				createMethodBody = true;
+			}
+			if (createMethodBody) {
 				MemberMapping mm;
 				astMethod.Body = CreateMethodBody(methodDef, astMethod.Parameters, out mm);
 				astMethod.AddAnnotation(mm);
@@ -928,7 +996,7 @@ namespace ICSharpCode.Decompiler.Ast {
 			foreach (var gp in genericParameters) {
 				TypeParameterDeclaration tp = new TypeParameterDeclaration();
 				tp.AddAnnotation(gp);
-				tp.NameToken = Identifier.Create(CleanName(gp.Name)).WithAnnotation(TextTokenHelper.GetTextTokenType(gp));
+				tp.NameToken = Identifier.Create(CleanName(gp.Name)).WithAnnotation(TextTokenKindUtils.GetTextTokenType(gp));
 				if (gp.IsContravariant)
 					tp.Variance = VarianceModifier.Contravariant;
 				else if (gp.IsCovariant)
@@ -1102,6 +1170,10 @@ namespace ICSharpCode.Decompiler.Ast {
 				astEvent.ReturnType = ConvertType(eventDef.EventType, eventDef);
 				if (!eventDef.DeclaringType.IsInterface)
 					astEvent.Modifiers = ConvertModifiers(eventDef.AddMethod);
+				if (eventDef.RemoveMethod != null)
+					AddComment(astEvent, eventDef.RemoveMethod);
+				if (eventDef.AddMethod != null)
+					AddComment(astEvent, eventDef.AddMethod);
 				AddComment(astEvent, eventDef);
 				return astEvent;
 			} else {
@@ -1144,7 +1216,6 @@ namespace ICSharpCode.Decompiler.Ast {
 		}
 		
 		public bool DecompileMethodBodies { get; set; }
-		public bool DontShowCreateMethodBodyExceptions { get; set; }
 		
 		BlockStatement CreateMethodBody(MethodDef method, IEnumerable<ParameterDeclaration> parameters, out MemberMapping mm)
 		{
@@ -1157,8 +1228,6 @@ namespace ICSharpCode.Decompiler.Ast {
 					throw;
 				}
 				catch (Exception ex) {
-					if (DontShowCreateMethodBodyExceptions)
-						throw;
 					msg = string.Format("{0}An exception occurred when decompiling this method ({1:X8}){0}{0}{2}{0}",
 							Environment.NewLine, method.MDToken.ToUInt32(), ex.ToString());
 				}
@@ -1254,7 +1323,7 @@ namespace ICSharpCode.Decompiler.Ast {
 				method.CallingConvention == dnlib.DotNet.CallingConvention.NativeVarArg) {
 				var pd = new ParameterDeclaration {
 					Type = new PrimitiveType("__arglist"),
-					NameToken = Identifier.Create("").WithAnnotation(TextTokenType.Parameter)
+					NameToken = Identifier.Create("").WithAnnotation(TextTokenKind.Parameter)
 				};
 				return parameters.Concat(new[] { pd });
 			} else {
@@ -1651,14 +1720,14 @@ namespace ICSharpCode.Decompiler.Ast {
 						TypeDef resolvedAttributeType = customAttribute.AttributeType.ResolveTypeDef();
 						foreach (var propertyNamedArg in customAttribute.Properties) {
 							var propertyReference = resolvedAttributeType != null ? resolvedAttributeType.Properties.FirstOrDefault(pr => pr.Name == propertyNamedArg.Name) : null;
-							var propertyName = IdentifierExpression.Create(propertyNamedArg.Name, TextTokenHelper.GetTextTokenType((object)propertyReference ?? TextTokenType.InstanceProperty), true).WithAnnotation(propertyReference);
+							var propertyName = IdentifierExpression.Create(propertyNamedArg.Name, TextTokenKindUtils.GetTextTokenType((object)propertyReference ?? TextTokenKind.InstanceProperty), true).WithAnnotation(propertyReference);
 							var argumentValue = ConvertArgumentValue(propertyNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(propertyName, argumentValue));
 						}
 
 						foreach (var fieldNamedArg in customAttribute.Fields) {
 							var fieldReference = resolvedAttributeType != null ? resolvedAttributeType.Fields.FirstOrDefault(f => f.Name == fieldNamedArg.Name) : null;
-							var fieldName = IdentifierExpression.Create(fieldNamedArg.Name, TextTokenHelper.GetTextTokenType((object)fieldReference ?? TextTokenType.InstanceField), true).WithAnnotation(fieldReference);
+							var fieldName = IdentifierExpression.Create(fieldNamedArg.Name, TextTokenKindUtils.GetTextTokenType((object)fieldReference ?? TextTokenKind.InstanceField), true).WithAnnotation(fieldReference);
 							var argumentValue = ConvertArgumentValue(fieldNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(fieldName, argumentValue));
 						}
@@ -1712,14 +1781,14 @@ namespace ICSharpCode.Decompiler.Ast {
 						TypeDef resolvedAttributeType = secAttribute.AttributeType.ResolveTypeDef();
 						foreach (var propertyNamedArg in secAttribute.Properties) {
 							var propertyReference = resolvedAttributeType != null ? resolvedAttributeType.Properties.FirstOrDefault(pr => pr.Name == propertyNamedArg.Name) : null;
-							var propertyName = IdentifierExpression.Create(propertyNamedArg.Name, TextTokenHelper.GetTextTokenType((object)propertyReference ?? TextTokenType.InstanceProperty), true).WithAnnotation(propertyReference);
+							var propertyName = IdentifierExpression.Create(propertyNamedArg.Name, TextTokenKindUtils.GetTextTokenType((object)propertyReference ?? TextTokenKind.InstanceProperty), true).WithAnnotation(propertyReference);
 							var argumentValue = ConvertArgumentValue(propertyNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(propertyName, argumentValue));
 						}
 
 						foreach (var fieldNamedArg in secAttribute.Fields) {
 							var fieldReference = resolvedAttributeType != null ? resolvedAttributeType.Fields.FirstOrDefault(f => f.Name == fieldNamedArg.Name) : null;
-							var fieldName = IdentifierExpression.Create(fieldNamedArg.Name, TextTokenHelper.GetTextTokenType((object)fieldReference ?? TextTokenType.InstanceField), true).WithAnnotation(fieldReference);
+							var fieldName = IdentifierExpression.Create(fieldNamedArg.Name, TextTokenKindUtils.GetTextTokenType((object)fieldReference ?? TextTokenKind.InstanceField), true).WithAnnotation(fieldReference);
 							var argumentValue = ConvertArgumentValue(fieldNamedArg.Argument);
 							attribute.Arguments.Add(new AssignmentExpression(fieldName, argumentValue));
 						}

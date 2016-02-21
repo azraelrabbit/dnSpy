@@ -175,7 +175,17 @@ namespace ICSharpCode.TreeView
 					FocusNode((SharpTreeNode)SelectedItem);
 			}
 		}
-		
+
+		protected override void ClearContainerForItemOverride(DependencyObject element, object item) {
+			var item2 = element as SharpTreeViewItem;
+			if (item2 != null) {
+				var nv = item2.NodeView;
+				if (nv != null)
+					nv.DataContext = null;
+			}
+			base.ClearContainerForItemOverride(element, item);
+		}
+
 		protected override DependencyObject GetContainerForItemOverride()
 		{
 			return new SharpTreeViewItem();

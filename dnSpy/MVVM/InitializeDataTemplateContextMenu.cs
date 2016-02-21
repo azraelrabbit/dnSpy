@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -19,26 +19,25 @@
 
 using System.ComponentModel.Composition;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using ICSharpCode.ILSpy;
+using dnSpy.Contracts.Menus;
+using dnSpy.Shared.MVVM;
 
 namespace dnSpy.MVVM {
-	[Export(typeof(IInitializeDataTemplate))]
+	[Export(typeof(IInitializeDataTemplate)), PartCreationPolicy(CreationPolicy.Shared)]
 	sealed class InitializeDataTemplateContextMenu : IInitializeDataTemplate {
+		readonly IMenuManager menuManager;
+
+		[ImportingConstructor]
+		InitializeDataTemplateContextMenu(IMenuManager menuManager) {
+			this.menuManager = menuManager;
+		}
+
 		public void Initialize(DependencyObject d) {
 			var fwe = d as FrameworkElement;
 			if (fwe == null)
 				return;
 
-			if (fwe is ListBox)
-				ContextMenuProvider.Add(fwe, ListBoxIgnore);
-			else
-				ContextMenuProvider.Add(fwe);
-		}
-
-		static bool ListBoxIgnore(DependencyObject o) {
-			return o is ScrollBar;
+			menuManager.InitializeContextMenu(fwe, MenuConstants.GUIDOBJ_UNKNOWN_GUID);
 		}
 	}
 }

@@ -38,16 +38,36 @@ namespace dnSpy.BamlDecompiler.Baml {
 	}
 
 	internal class BamlReader {
+		const string MSBAML_SIG = "MSBAML";
+
+		internal static bool IsBamlHeader(Stream str) {
+			var pos = str.Position;
+			try {
+				var rdr = new BinaryReader(str, Encoding.Unicode);
+				int len = (int)(rdr.ReadUInt32() >> 1);
+				if (len != MSBAML_SIG.Length)
+					return false;
+				var sig = new string(rdr.ReadChars(len));
+				return sig == MSBAML_SIG;
+			}
+			finally {
+				str.Position = pos;
+			}
+		}
+
+		static string ReadSignature(Stream str) {
+			var rdr = new BinaryReader(str, Encoding.Unicode);
+			uint len = rdr.ReadUInt32();
+			var sig = new string(rdr.ReadChars((int)(len >> 1)));
+			rdr.ReadBytes((int)(((len + 3) & ~3) - len));
+			return sig;
+		}
+
 		public static BamlDocument ReadDocument(Stream str, CancellationToken token) {
 			var ret = new BamlDocument();
 			var reader = new BamlBinaryReader(str);
-			{
-				var rdr = new BinaryReader(str, Encoding.Unicode);
-				uint len = rdr.ReadUInt32();
-				ret.Signature = new string(rdr.ReadChars((int)(len >> 1)));
-				rdr.ReadBytes((int)(((len + 3) & ~3) - len));
-			}
-			if (ret.Signature != "MSBAML") throw new NotSupportedException();
+			ret.Signature = ReadSignature(str);
+			if (ret.Signature != MSBAML_SIG) throw new NotSupportedException();
 			ret.ReaderVersion = new BamlDocument.BamlVersion { Major = reader.ReadUInt16(), Minor = reader.ReadUInt16() };
 			ret.UpdaterVersion = new BamlDocument.BamlVersion { Major = reader.ReadUInt16(), Minor = reader.ReadUInt16() };
 			ret.WriterVersion = new BamlDocument.BamlVersion { Major = reader.ReadUInt16(), Minor = reader.ReadUInt16() };

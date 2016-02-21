@@ -22,12 +22,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-
+using dnlib.DotNet;
+using dnSpy.Decompiler.Shared;
 using ICSharpCode.Decompiler.Ast;
 using ICSharpCode.Decompiler.Tests.Helpers;
 using Microsoft.CSharp;
-using dnlib.DotNet;
-using NUnit.Framework;
 
 namespace ICSharpCode.Decompiler.Tests
 {
@@ -77,7 +76,7 @@ namespace ICSharpCode.Decompiler.Tests
 					}
 					throw new Exception(b.ToString());
 				}
-				return Utils.OpenAssembly(results.PathToAssembly);
+				return Utils.OpenModule(results.PathToAssembly).Assembly;
 			}
 			finally
 			{

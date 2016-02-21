@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -21,17 +21,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using dnlib.DotNet;
-using ICSharpCode.ILSpy;
+using dnSpy.Contracts.Files;
+using dnSpy.Shared.Files;
 
 namespace dnSpy.Files {
-	public sealed class AssemblyResolver : IAssemblyResolver {
-		readonly DnSpyFileList fileList;
+	sealed class AssemblyResolver : IAssemblyResolver {
+		readonly FileManager fileManager;
 
 		static readonly Version invalidMscorlibVersion = new Version(255, 255, 255, 255);
 		static readonly Version newMscorlibVersion = new Version(4, 0, 0, 0);
 
-		public AssemblyResolver(DnSpyFileList fileList) {
-			this.fileList = fileList;
+		public AssemblyResolver(FileManager fileManager) {
+			this.fileManager = fileManager;
 		}
 
 		public void AddSearchPath(string s) {
@@ -56,15 +57,13 @@ namespace dnSpy.Files {
 		}
 
 		AssemblyDef IAssemblyResolver.Resolve(IAssembly assembly, ModuleDef sourceModule) {
-			var file = Resolve(assembly, sourceModule, true);
+			var file = Resolve(assembly, sourceModule);
 			return file == null ? null : file.AssemblyDef;
 		}
 
-		public DnSpyFile Resolve(IAssembly assembly, ModuleDef sourceModule = null, bool delayLoad = false) {
-			FrameworkRedirect.ApplyFrameworkRedirect(ref assembly, sourceModule);
-
+		public IDnSpyFile Resolve(IAssembly assembly, ModuleDef sourceModule = null) {
 			if (assembly.IsContentTypeWindowsRuntime)
-				return ResolveWinMD(assembly, sourceModule, delayLoad);
+				return ResolveWinMD(assembly, sourceModule);
 
 			// WinMD files have a reference to mscorlib but its version is always 255.255.255.255
 			// since mscorlib isn't really loaded. The resolver only loads exact versions, so
@@ -72,38 +71,38 @@ namespace dnSpy.Files {
 			if (assembly.Name == "mscorlib" && assembly.Version == invalidMscorlibVersion)
 				assembly = new AssemblyNameInfo(assembly) { Version = newMscorlibVersion };
 
-			return ResolveNormal(assembly, sourceModule, delayLoad);
+			return ResolveNormal(assembly, sourceModule);
 		}
 
-		DnSpyFile ResolveNormal(IAssembly assembly, ModuleDef sourceModule, bool delayLoad) {
-			var existingFile = fileList.FindAssembly(assembly);
+		IDnSpyFile ResolveNormal(IAssembly assembly, ModuleDef sourceModule) {
+			var existingFile = fileManager.FindAssembly(assembly);
 			if (existingFile != null)
 				return existingFile;
 
 			var file = LookupFromSearchPaths(assembly, sourceModule, true);
 			if (file != null)
-				return fileList.AddFile(file, fileList.AssemblyLoadEnabled, delayLoad);
+				return fileManager.GetOrAddCanDispose(file);
 
-			if (fileList.UseGAC) {
-				var gacFile = GacInterop.FindAssemblyInNetGac(assembly);
+			if (fileManager.Settings.UseGAC) {
+				var gacFile = GacInfo.FindInGac(assembly);
 				if (gacFile != null)
-					return fileList.GetOrCreate(gacFile, fileList.AssemblyLoadEnabled, true, delayLoad);
+					return fileManager.TryGetOrCreateInternal(DnSpyFileInfo.CreateFile(gacFile), true, true);
 				foreach (var path in GacInfo.OtherGacPaths) {
 					file = TryLoadFromDir(assembly, true, path);
 					if (file != null)
-						return fileList.AddFile(file, fileList.AssemblyLoadEnabled, delayLoad);
+						return fileManager.GetOrAddCanDispose(file);
 				}
 			}
 
 			file = LookupFromSearchPaths(assembly, sourceModule, false);
 			if (file != null)
-				return fileList.AddFile(file, fileList.AssemblyLoadEnabled, delayLoad);
+				return fileManager.GetOrAddCanDispose(file);
 
 			return null;
 		}
 
-		DnSpyFile LookupFromSearchPaths(IAssembly asmName, ModuleDef sourceModule, bool exactCheck) {
-			DnSpyFile file;
+		IDnSpyFile LookupFromSearchPaths(IAssembly asmName, ModuleDef sourceModule, bool exactCheck) {
+			IDnSpyFile file;
 			string sourceModuleDir = null;
 			if (sourceModule != null && File.Exists(sourceModule.Location)) {
 				sourceModuleDir = Path.GetDirectoryName(sourceModule.Location);
@@ -121,7 +120,7 @@ namespace dnSpy.Files {
 			return null;
 		}
 
-		DnSpyFile TryLoadFromDir(IAssembly asmName, bool exactCheck, string dirPath) {
+		IDnSpyFile TryLoadFromDir(IAssembly asmName, bool exactCheck, string dirPath) {
 			string baseName;
 			try {
 				baseName = Path.Combine(dirPath, asmName.Name);
@@ -133,14 +132,16 @@ namespace dnSpy.Files {
 				   TryLoadFromDir2(asmName, exactCheck, baseName + ".exe");
 		}
 
-		DnSpyFile TryLoadFromDir2(IAssembly asmName, bool exactCheck, string filename) {
+		IDnSpyFile TryLoadFromDir2(IAssembly asmName, bool exactCheck, string filename) {
 			if (!File.Exists(filename))
 				return null;
 
-			DnSpyFile file = null;
+			IDnSpyFile file = null;
 			bool error = true;
 			try {
-				file = fileList.CreateDnSpyFile(filename);
+				file = fileManager.TryCreateDnSpyFile(DnSpyFileInfo.CreateFile(filename));
+				if (file == null)
+					return null;
 				file.IsAutoLoaded = true;
 				var asm = file.AssemblyDef;
 				if (asm == null)
@@ -156,14 +157,14 @@ namespace dnSpy.Files {
 			}
 			finally {
 				if (error) {
-					if (file != null)
-						file.Dispose();
+					if (file is IDisposable)
+						((IDisposable)file).Dispose();
 				}
 			}
 		}
 
-		DnSpyFile ResolveWinMD(IAssembly assembly, ModuleDef sourceModule, bool delayLoad) {
-			var existingFile = fileList.FindAssembly(assembly);
+		IDnSpyFile ResolveWinMD(IAssembly assembly, ModuleDef sourceModule) {
+			var existingFile = fileManager.FindAssembly(assembly);
 			if (existingFile != null)
 				return existingFile;
 
@@ -176,7 +177,7 @@ namespace dnSpy.Files {
 					continue;
 				}
 				if (File.Exists(file))
-					return fileList.GetOrCreate(file, fileList.AssemblyLoadEnabled, true, delayLoad);
+					return fileManager.TryGetOrCreateInternal(DnSpyFileInfo.CreateFile(file), true, true);
 			}
 			return null;
 		}

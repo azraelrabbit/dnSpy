@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -21,315 +21,152 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text.RegularExpressions;
-using System.Threading;
 using System.Windows.Threading;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 using dnlib.DotNet.Resources;
-using dnSpy.Files;
-using dnSpy.Images;
-using dnSpy.TreeNodes;
-using ICSharpCode.ILSpy;
-using ICSharpCode.ILSpy.TreeNodes;
+using dnSpy.Contracts.Files;
+using dnSpy.Contracts.Files.TreeView;
+using dnSpy.Contracts.Files.TreeView.Resources;
+using dnSpy.Contracts.Images;
+using dnSpy.Contracts.Search;
+using dnSpy.Shared.Search;
 
 namespace dnSpy.Search {
-	interface ISearchComparer {
-		/// <summary>
-		/// Checks whether some value matches something
-		/// </summary>
-		/// <param name="text">String representation of <paramref name="obj"/> or null</param>
-		/// <param name="obj">Original object</param>
-		/// <returns></returns>
-		bool IsMatch(string text, object obj);
-	}
-
-	sealed class RegExStringLiteralSearchComparer : ISearchComparer {
-		readonly Regex regex;
-
-		public RegExStringLiteralSearchComparer(Regex regex) {
-			if (regex == null)
-				throw new ArgumentNullException();
-			this.regex = regex;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			var hc = obj as IHasConstant;
-			if (hc != null && hc.Constant != null)
-				obj = hc.Constant.Value;
-
-			text = obj as string;
-			return text != null && regex.IsMatch(text);
-		}
-	}
-
-	sealed class StringLiteralSearchComparer : ISearchComparer {
-		readonly string str;
-		readonly StringComparison stringComparison;
-		readonly bool matchWholeString;
-
-		public StringLiteralSearchComparer(string s, bool caseSensitive = false, bool matchWholeString = false) {
-			if (s == null)
-				throw new ArgumentNullException();
-			this.str = s;
-			this.stringComparison = caseSensitive ? StringComparison.InvariantCulture : StringComparison.InvariantCultureIgnoreCase;
-			this.matchWholeString = matchWholeString;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			var hc = obj as IHasConstant;
-			if (hc != null && hc.Constant != null)
-				obj = hc.Constant.Value;
-
-			text = obj as string;
-			if (text == null)
-				return false;
-			if (matchWholeString)
-				return text.Equals(str, stringComparison);
-			return text.IndexOf(str, stringComparison) >= 0;
-		}
-	}
-
-	sealed class IntegerLiteralSearchComparer : ISearchComparer {
-		readonly long searchValue;
-
-		public IntegerLiteralSearchComparer(long value) {
-			this.searchValue = value;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			var hc = obj as IHasConstant;
-			if (hc != null && hc.Constant != null)
-				obj = hc.Constant.Value;
-			if (obj == null)
-				return false;
-
-			switch (Type.GetTypeCode(obj.GetType())) {
-			case TypeCode.Char:		return searchValue == (char)obj;
-			case TypeCode.SByte:	return searchValue == (sbyte)obj;
-			case TypeCode.Byte:		return searchValue == (byte)obj;
-			case TypeCode.Int16:	return searchValue == (short)obj;
-			case TypeCode.UInt16:	return searchValue == (ushort)obj;
-			case TypeCode.Int32:	return searchValue == (int)obj;
-			case TypeCode.UInt32:	return searchValue == (uint)obj;
-			case TypeCode.Int64:	return searchValue == (long)obj;
-			case TypeCode.UInt64:	return searchValue == unchecked((long)(ulong)obj);
-			case TypeCode.Single:	return searchValue == (float)obj;
-			case TypeCode.Double:	return searchValue == (double)obj;
-			case TypeCode.Decimal:	return searchValue == (decimal)obj;
-			case TypeCode.DateTime: return new DateTime(searchValue) == (DateTime)obj;
-			}
-
-			return false;
-		}
-	}
-
-	sealed class DoubleLiteralSearchComparer : ISearchComparer {
-		readonly double searchValue;
-
-		public DoubleLiteralSearchComparer(double value) {
-			this.searchValue = value;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			var hc = obj as IHasConstant;
-			if (hc != null && hc.Constant != null)
-				obj = hc.Constant.Value;
-			if (obj == null)
-				return false;
-
-			switch (Type.GetTypeCode(obj.GetType())) {
-			case TypeCode.Char:		return searchValue == (char)obj;
-			case TypeCode.SByte:	return searchValue == (sbyte)obj;
-			case TypeCode.Byte:		return searchValue == (byte)obj;
-			case TypeCode.Int16:	return searchValue == (short)obj;
-			case TypeCode.UInt16:	return searchValue == (ushort)obj;
-			case TypeCode.Int32:	return searchValue == (int)obj;
-			case TypeCode.UInt32:	return searchValue == (uint)obj;
-			case TypeCode.Int64:	return searchValue == (long)obj;
-			case TypeCode.UInt64:	return searchValue == (ulong)obj;
-			case TypeCode.Single:	return searchValue == (float)obj;
-			case TypeCode.Double:	return searchValue == (double)obj;
-			}
-
-			return false;
-		}
-	}
-
-	sealed class RegExSearchComparer : ISearchComparer {
-		readonly Regex regex;
-
-		public RegExSearchComparer(Regex regex) {
-			if (regex == null)
-				throw new ArgumentNullException();
-			this.regex = regex;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			if (text == null)
-				return false;
-			return regex.IsMatch(text);
-		}
-	}
-
-	sealed class AndSearchComparer : ISearchComparer {
-		readonly string[] searchTerms;
-		readonly StringComparison stringComparison;
-		readonly bool matchWholeWords;
-
-		public AndSearchComparer(string[] searchTerms, bool caseSensitive = false, bool matchWholeWords = false)
-			: this(searchTerms, caseSensitive ? StringComparison.InvariantCulture : StringComparison.InvariantCultureIgnoreCase, matchWholeWords) {
-		}
-
-		public AndSearchComparer(string[] searchTerms, StringComparison stringComparison, bool matchWholeWords = false) {
-			this.searchTerms = searchTerms;
-			this.stringComparison = stringComparison;
-			this.matchWholeWords = matchWholeWords;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			if (text == null)
-				return false;
-			foreach (var searchTerm in searchTerms) {
-				if (matchWholeWords) {
-					if (!text.Equals(searchTerm, stringComparison))
-						return false;
-				}
-				else {
-					if (text.IndexOf(searchTerm, stringComparison) < 0)
-						return false;
-				}
-			}
-
-			return true;
-		}
-	}
-
-	sealed class OrSearchComparer : ISearchComparer {
-		readonly string[] searchTerms;
-		readonly StringComparison stringComparison;
-		readonly bool matchWholeWords;
-
-		public OrSearchComparer(string[] searchTerms, bool caseSensitive = false, bool matchWholeWords = false)
-			: this(searchTerms, caseSensitive ? StringComparison.InvariantCulture : StringComparison.InvariantCultureIgnoreCase, matchWholeWords) {
-		}
-
-		public OrSearchComparer(string[] searchTerms, StringComparison stringComparison, bool matchWholeWords = false) {
-			this.searchTerms = searchTerms;
-			this.stringComparison = stringComparison;
-			this.matchWholeWords = matchWholeWords;
-		}
-
-		public bool IsMatch(string text, object obj) {
-			if (text == null)
-				return false;
-			foreach (var searchTerm in searchTerms) {
-				if (matchWholeWords) {
-					if (text.Equals(searchTerm, stringComparison))
-						return true;
-				}
-				else {
-					if (text.IndexOf(searchTerm, stringComparison) >= 0)
-						return true;
-				}
-			}
-
-			return false;
-		}
-	}
-
 	/// <summary>
 	/// Searches types/members/etc for text. A filter decides which type/member/etc to check.
 	/// </summary>
 	sealed class FilterSearcher {
-		readonly ITreeViewNodeFilter filter;
-		readonly ISearchComparer searchComparer;
-		readonly Action<SearchResult> onMatch;
-		readonly Language language;
-		CancellationToken cancellationToken;
+		readonly FilterSearcherOptions options;
 
-		/// <summary>
-		/// Constructor
-		/// </summary>
-		/// <param name="filter">Filter</param>
-		/// <param name="searchComparer">Search comparer</param>
-		/// <param name="onMatch">Called when there's a match</param>
-		/// <param name="language">Language</param>
-		/// <param name="cancellationToken">Cancellation token</param>
-		public FilterSearcher(ITreeViewNodeFilter filter, ISearchComparer searchComparer, Action<SearchResult> onMatch, Language language, CancellationToken cancellationToken) {
-			if (filter == null)
-				throw new ArgumentNullException();
-			if (searchComparer == null)
-				throw new ArgumentNullException();
-			if (onMatch == null)
-				throw new ArgumentNullException();
-			if (language == null)
-				throw new ArgumentNullException();
-			this.filter = filter;
-			this.searchComparer = searchComparer;
-			this.onMatch = onMatch;
-			this.language = language;
-			this.cancellationToken = cancellationToken;
+		public FilterSearcher(FilterSearcherOptions options) {
+			this.options = options;
 		}
 
 		bool IsMatch(string text, object obj) {
-			return searchComparer.IsMatch(text, obj);
+			return options.SearchComparer.IsMatch(text, obj);
 		}
 
-		/// <summary>
-		/// Search the assemblies and netmodules.
-		/// </summary>
-		/// <param name="asmNodes">Assembly and/or netmodule nodes</param>
-		public void SearchAssemblies(IEnumerable<AssemblyTreeNode> asmNodes) {
-			foreach (var asmNode in asmNodes) {
-				cancellationToken.ThrowIfCancellationRequested();
-				if (asmNode.DnSpyFile.AssemblyDef != null)
-					SearchAssemblyInternal(asmNode);
-				else
-					SearchModule(asmNode.DnSpyFile);
+		public void SearchAssemblies(IEnumerable<IDnSpyFileNode> fileNodes) {
+			foreach (var fileNode in fileNodes) {
+				options.CancellationToken.ThrowIfCancellationRequested();
+				if (fileNode is IAssemblyFileNode)
+					SearchAssemblyInternal((IAssemblyFileNode)fileNode);
+				else if (fileNode is IModuleFileNode)
+					SearchModule(fileNode.DnSpyFile);
 			}
 		}
 
-		void SearchAssemblyInternal(AssemblyTreeNode asmNode) {
+		public void SearchTypes(IEnumerable<SearchTypeInfo> types) {
+			foreach (var info in types) {
+				options.CancellationToken.ThrowIfCancellationRequested();
+				if (info.Type.DeclaringType == null)
+					Search(info.DnSpyFile, info.Type.Namespace, info.Type);
+				else
+					Search(info.DnSpyFile, info.Type);
+			}
+		}
+
+		void CheckCustomAttributes(IDnSpyFile file, IHasCustomAttribute hca, object parent) {
+			var res = options.Filter.GetResultAttributes(hca);
+			if (!res.IsMatch)
+				return;
+			foreach (var ca in hca.CustomAttributes) {
+				foreach (var o in ca.ConstructorArguments) {
+					if (CheckCA(file, hca, parent, o))
+						return;
+				}
+				foreach (var o in ca.NamedArguments) {
+					if (CheckCA(file, hca, parent, o.Argument))
+						return;
+				}
+			}
+		}
+
+		bool CheckCA(IDnSpyFile file, IHasCustomAttribute hca, object parent, CAArgument o) {
+			var value = o.Value;
+			var u = value as UTF8String;
+			if (!ReferenceEquals(u, null))
+				value = u.String;
+			if (!IsMatch(null, value))
+				return false;
+			options.OnMatch(new SearchResult {
+				Context = options.Context,
+				Object = hca,
+				NameObject = hca,
+				ObjectImageReference = GetImageReference(hca),
+				LocationObject = parent is string ? new NamespaceSearchResult((string)parent) : parent,
+				LocationImageReference = GetImageReference(parent),
+				DnSpyFile = file,
+			});
+			return true;
+		}
+
+		ImageReference GetImageReference(object obj) {
+			if (obj is ModuleDef)
+				return options.DotNetImageManager.GetImageReference((ModuleDef)obj);
+			if (obj is AssemblyDef)
+				return options.DotNetImageManager.GetImageReference((AssemblyDef)obj);
+			if (obj is TypeDef)
+				return options.DotNetImageManager.GetImageReference((TypeDef)obj);
+			if (obj is MethodDef)
+				return options.DotNetImageManager.GetImageReference((MethodDef)obj);
+			if (obj is FieldDef)
+				return options.DotNetImageManager.GetImageReference((FieldDef)obj);
+			if (obj is PropertyDef)
+				return options.DotNetImageManager.GetImageReference((PropertyDef)obj);
+			if (obj is EventDef)
+				return options.DotNetImageManager.GetImageReference((EventDef)obj);
+			if (obj is ParamDef)
+				return options.DotNetImageManager.GetImageReferenceParameter();
+			if (obj is GenericParam)
+				return options.DotNetImageManager.GetImageReferenceGenericParameter();
+			if (obj is string)
+				return options.DotNetImageManager.GetNamespaceImageReference();
+
+			return new ImageReference();
+		}
+
+		void SearchAssemblyInternal(IAssemblyFileNode asmNode) {
 			if (asmNode == null)
 				return;
-			var res = filter.GetFilterResult(asmNode.DnSpyFile, AssemblyFilterType.Assembly);
-			if (res.FilterResult == FilterResult.Hidden)
+			var asm = asmNode.DnSpyFile.AssemblyDef;
+			Debug.Assert(asm != null);
+			if (asm == null)
 				return;
+			var res = options.Filter.GetResult(asm);
+			if (res.FilterType == FilterType.Hide)
+				return;
+			CheckCustomAttributes(asmNode.DnSpyFile, asm, null);
 
-			if (res.IsMatch && IsMatch(asmNode.DnSpyFile.AssemblyDef.FullName, asmNode.DnSpyFile)) {
-				onMatch(new SearchResult {
-					Language = language,
-					Object = asmNode,
-					NameObject = asmNode.DnSpyFile.AssemblyDef,
-					TypeImageInfo = GetAssemblyImage(asmNode.DnSpyFile.ModuleDef),
+			if (res.IsMatch && IsMatch(asm.FullName, asmNode.DnSpyFile)) {
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
+					Object = asm,
+					NameObject = asm,
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(asmNode.DnSpyFile.ModuleDef),
 					LocationObject = null,
-					LocationImageInfo = new ImageInfo(),
+					LocationImageReference = new ImageReference(),
 					DnSpyFile = asmNode.DnSpyFile,
 				});
 			}
 
-			Debug.Assert(!asmNode.LazyLoading);
-			if (asmNode.LazyLoading)
-				throw new InvalidOperationException("Assembly's children haven't been loaded yet. Load them in the UI thread.");
-			foreach (AssemblyTreeNode modNode in asmNode.Children) {
-				cancellationToken.ThrowIfCancellationRequested();
-				SearchModule(modNode.DnSpyFile);
+			if (asmNode.TreeNode.LazyLoading) {
+				options.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() => {
+					asmNode.TreeNode.EnsureChildrenLoaded();
+				}));
+			}
+			var modChildren = asmNode.TreeNode.DataChildren.OfType<IModuleFileNode>().ToArray();
+
+			foreach (var node in asmNode.TreeNode.DataChildren) {
+				options.CancellationToken.ThrowIfCancellationRequested();
+				var modNode = node as IModuleFileNode;
+				if (modNode != null)
+					SearchModule(modNode.DnSpyFile);
 			}
 		}
 
-		static ImageInfo GetAssemblyImage(ModuleDef module) {
-			if (module == null)
-				return new ImageInfo();
-			return (module.Characteristics & dnlib.PE.Characteristics.Dll) == 0 ?
-				GetImage("AssemblyExe") : GetImage("Assembly");
-		}
-
-		static ImageInfo GetImage(string name) {
-			return new ImageInfo(name, BackgroundType.Search);
-		}
-
-		void SearchModule(DnSpyFile module) {
+		void SearchModule(IDnSpyFile module) {
 			if (module == null)
 				return;
 			var mod = module.ModuleDef;
@@ -338,18 +175,19 @@ namespace dnSpy.Search {
 				return;
 			}
 
-			var res = filter.GetFilterResult(module, AssemblyFilterType.NetModule);
-			if (res.FilterResult == FilterResult.Hidden)
+			var res = options.Filter.GetResult(mod);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(module, mod, mod.Assembly);
 
 			if (res.IsMatch && IsMatch(mod.FullName, module)) {
-				onMatch(new SearchResult {
-					Language = language,
-					Object = module,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
+					Object = mod,
 					NameObject = mod,
-					TypeImageInfo = GetImage("AssemblyModule"),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(mod),
 					LocationObject = mod.Assembly != null ? mod.Assembly : null,
-					LocationImageInfo = mod.Assembly != null ? GetAssemblyImage(mod.Assembly.ManifestModule) : new ImageInfo(),
+					LocationImageReference = mod.Assembly != null ? options.DotNetImageManager.GetImageReference(mod.Assembly.ManifestModule) : new ImageReference(),
 					DnSpyFile = module,
 				});
 			}
@@ -358,72 +196,72 @@ namespace dnSpy.Search {
 			SearchResources(module);
 
 			foreach (var kv in GetNamespaces(mod)) {
-				cancellationToken.ThrowIfCancellationRequested();
+				options.CancellationToken.ThrowIfCancellationRequested();
 				Search(module, kv.Key, kv.Value);
 			}
 		}
 
-		void SearchModAsmReferences(DnSpyFile module) {
-			var res = filter.GetFilterResult((ReferenceFolderTreeNode)null);
-			if (res.FilterResult == FilterResult.Hidden)
+		void SearchModAsmReferences(IDnSpyFile module) {
+			var res = options.Filter.GetResult((IReferencesFolderNode)null);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
 			foreach (var asmRef in module.ModuleDef.GetAssemblyRefs()) {
-				res = filter.GetFilterResult(asmRef);
-				if (res.FilterResult == FilterResult.Hidden)
+				res = options.Filter.GetResult(asmRef);
+				if (res.FilterType == FilterType.Hide)
 					continue;
 
 				if (res.IsMatch && IsMatch(asmRef.FullName, asmRef)) {
-					onMatch(new SearchResult {
-						Language = language,
+					options.OnMatch(new SearchResult {
+						Context = options.Context,
 						Object = asmRef,
 						NameObject = asmRef,
-						TypeImageInfo = GetImage("AssemblyReference"),
+						ObjectImageReference = options.DotNetImageManager.GetImageReferenceAssemblyRef(),
 						LocationObject = module.ModuleDef,
-						LocationImageInfo = GetImage("AssemblyModule"),
+						LocationImageReference = options.DotNetImageManager.GetImageReference(module.ModuleDef),
 						DnSpyFile = module,
 					});
 				}
 			}
 
 			foreach (var modRef in module.ModuleDef.GetModuleRefs()) {
-				res = filter.GetFilterResult(modRef);
-				if (res.FilterResult == FilterResult.Hidden)
+				res = options.Filter.GetResult(modRef);
+				if (res.FilterType == FilterType.Hide)
 					continue;
 
 				if (res.IsMatch && IsMatch(modRef.FullName, modRef)) {
-					onMatch(new SearchResult {
-						Language = language,
+					options.OnMatch(new SearchResult {
+						Context = options.Context,
 						Object = modRef,
 						NameObject = modRef,
-						TypeImageInfo = GetImage("ModuleReference"),
+						ObjectImageReference = options.DotNetImageManager.GetImageReferenceModuleRef(),
 						LocationObject = module.ModuleDef,
-						LocationImageInfo = GetImage("AssemblyModule"),
+						LocationImageReference = options.DotNetImageManager.GetImageReference(module.ModuleDef),
 						DnSpyFile = module,
 					});
 				}
 			}
 		}
 
-		void SearchResources(DnSpyFile module) {
-			var res = filter.GetFilterResult((ResourceListTreeNode)null);
-			if (res.FilterResult == FilterResult.Hidden)
+		void SearchResources(IDnSpyFile module) {
+			var res = options.Filter.GetResult((IResourcesFolderNode)null);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
-			res = filter.GetFilterResult((ResourceTreeNode)null);
-			if (res.FilterResult == FilterResult.Hidden)
+			res = options.Filter.GetResult((IResourceNode)null);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
-			var resNodes = new List<ResourceTreeNode>();
-			App.Current.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() => {
-				var modNode = MainWindow.Instance.DnSpyFileListTreeNode.FindModuleNode(module.ModuleDef);
+			var resNodes = new List<IResourceNode>();
+			options.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() => {
+				var modNode = options.FileTreeView.FindNode(module.ModuleDef);
 				if (modNode == null)
 					return;
-				modNode.EnsureChildrenFiltered();
-				var resListTreeNode = (ResourceListTreeNode)modNode.Children.FirstOrDefault(a => a is ResourceListTreeNode);
-				if (resListTreeNode != null) {
-					resListTreeNode.EnsureChildrenFiltered();
-					resNodes.AddRange(resListTreeNode.Children.Cast<ResourceTreeNode>());
+				modNode.TreeNode.EnsureChildrenLoaded();
+				var resFolder = modNode.TreeNode.Children.FirstOrDefault(a => a.Data is IResourcesFolderNode);
+				if (resFolder != null) {
+					resFolder.EnsureChildrenLoaded();
+					resNodes.AddRange(resFolder.DataChildren.OfType<IResourceNode>());
 				}
 			}));
 
@@ -431,40 +269,52 @@ namespace dnSpy.Search {
 				SearchResourceTreeNodes(module, node);
 		}
 
-		void SearchResourceTreeNodes(DnSpyFile module, ResourceTreeNode resTreeNode) {
-			var res = filter.GetFilterResult(resTreeNode);
-			if (res.FilterResult == FilterResult.Hidden)
+		string ToString(IResourceDataProvider resource) {
+			try {
+				return resource.ToString(options.CancellationToken, options.SearchDecompiledData);
+			}
+			catch (OperationCanceledException) {
+				throw;
+			}
+			catch {
+			}
+			return string.Empty;
+		}
+
+		void SearchResourceTreeNodes(IDnSpyFile module, IResourceNode resTreeNode) {
+			var res = options.Filter.GetResult(resTreeNode);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
-			if (res.IsMatch && (IsMatch(resTreeNode.Name, resTreeNode) || IsMatch(resTreeNode.GetStringContents(), null))) {
-				onMatch(new SearchResult {
-					Language = language,
+			if (res.IsMatch && (IsMatch(resTreeNode.Name, resTreeNode) || IsMatch(ToString(resTreeNode), null))) {
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = resTreeNode,
 					NameObject = resTreeNode,
-					TypeImageInfo = GetImage(resTreeNode.IconName),
+					ObjectImageReference = resTreeNode.Icon,
 					LocationObject = module.ModuleDef,
-					LocationImageInfo = GetImage("AssemblyModule"),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(module.ModuleDef),
 					DnSpyFile = module,
 				});
 			}
 
-			res = filter.GetFilterResult((ResourceElementTreeNode)null);
-			if (res.FilterResult == FilterResult.Hidden)
+			res = options.Filter.GetResult((IResourceElementNode)null);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
-			var resNodes = new List<ResourceElementTreeNode>();
-			App.Current.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() => {
-				resTreeNode.EnsureChildrenFiltered();
-				resNodes.AddRange(resTreeNode.Children.Cast<ResourceElementTreeNode>());
+			var resNodes = new List<IResourceElementNode>();
+			options.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() => {
+				resTreeNode.TreeNode.EnsureChildrenLoaded();
+				resNodes.AddRange(resTreeNode.TreeNode.DataChildren.OfType<IResourceElementNode>());
 			}));
 
 			foreach (var resElNode in resNodes)
 				SearchResourceElementTreeNode(module, resTreeNode, resElNode);
 		}
 
-		void SearchResourceElementTreeNode(DnSpyFile module, ResourceTreeNode resTreeNode, ResourceElementTreeNode resElNode) {
-			var res = filter.GetFilterResult(resElNode);
-			if (res.FilterResult == FilterResult.Hidden)
+		void SearchResourceElementTreeNode(IDnSpyFile module, IResourceNode resTreeNode, IResourceElementNode resElNode) {
+			var res = options.Filter.GetResult(resElNode);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
 			if (res.IsMatch) {
@@ -479,15 +329,15 @@ namespace dnSpy.Search {
 					}
 				}
 				if (!m)
-					m = IsMatch(resElNode.GetStringContents(), null);
+					m = IsMatch(ToString(resElNode), null);
 				if (m) {
-					onMatch(new SearchResult {
-						Language = language,
+					options.OnMatch(new SearchResult {
+						Context = options.Context,
 						Object = resElNode,
 						NameObject = resElNode,
-						TypeImageInfo = GetImage(resElNode.IconName),
+						ObjectImageReference = resElNode.Icon,
 						LocationObject = resTreeNode,
-						LocationImageInfo = GetImage(resTreeNode.IconName),
+						LocationImageReference = resTreeNode.Icon,
 						DnSpyFile = module,
 					});
 				}
@@ -507,62 +357,63 @@ namespace dnSpy.Search {
 			return ns;
 		}
 
-		void SearchNonNetFile(DnSpyFile nonNetFile) {
+		void SearchNonNetFile(IDnSpyFile nonNetFile) {
 			if (nonNetFile == null)
 				return;
-			var res = filter.GetFilterResult(nonNetFile, AssemblyFilterType.NonNetFile);
-			if (res.FilterResult == FilterResult.Hidden)
+			var res = options.Filter.GetResult(nonNetFile);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
-			if (res.IsMatch && IsMatch(nonNetFile.ShortName, nonNetFile)) {
-				onMatch(new SearchResult {
-					Language = language,
+			if (res.IsMatch && IsMatch(nonNetFile.GetShortName(), nonNetFile)) {
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = nonNetFile,
 					NameObject = nonNetFile,
-					TypeImageInfo = GetImage("AssemblyWarning"),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(nonNetFile.PEImage),
 					LocationObject = null,
-					LocationImageInfo = new ImageInfo(),
+					LocationImageReference = new ImageReference(),
 					DnSpyFile = nonNetFile,
 				});
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, string ns, List<TypeDef> types) {
-			var res = filter.GetFilterResult(ns, ownerModule);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, string ns, List<TypeDef> types) {
+			var res = options.Filter.GetResult(ns, ownerModule);
+			if (res.FilterType == FilterType.Hide)
 				return;
 
 			if (res.IsMatch && IsMatch(ns, ns)) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = ns,
 					NameObject = new NamespaceSearchResult(ns),
-					TypeImageInfo = GetImage("Namespace"),
+					ObjectImageReference = options.DotNetImageManager.GetNamespaceImageReference(),
 					LocationObject = ownerModule.ModuleDef,
-					LocationImageInfo = GetImage("AssemblyModule"),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(ownerModule.ModuleDef),
 					DnSpyFile = ownerModule,
 				});
 			}
 
 			foreach (var type in types) {
-				cancellationToken.ThrowIfCancellationRequested();
+				options.CancellationToken.ThrowIfCancellationRequested();
 				Search(ownerModule, ns, type);
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, string nsOwner, TypeDef type) {
-			var res = filter.GetFilterResult(type);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, string nsOwner, TypeDef type) {
+			var res = options.Filter.GetResult(type);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, type, nsOwner);
 
 			if (res.IsMatch && (IsMatch(type.FullName, type) || IsMatch(type.Name, type))) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = type,
 					NameObject = type,
-					TypeImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(type),
 					LocationObject = new NamespaceSearchResult(nsOwner),
-					LocationImageInfo = GetImage("Namespace"),
+					LocationImageReference = options.DotNetImageManager.GetNamespaceImageReference(),
 					DnSpyFile = ownerModule,
 				});
 			}
@@ -570,24 +421,25 @@ namespace dnSpy.Search {
 			SearchMembers(ownerModule, type);
 
 			foreach (var subType in type.GetTypes()) {
-				cancellationToken.ThrowIfCancellationRequested();
+				options.CancellationToken.ThrowIfCancellationRequested();
 				Search(ownerModule, subType);
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, TypeDef type) {
-			var res = filter.GetFilterResult(type);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, TypeDef type) {
+			var res = options.Filter.GetResult(type);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, type, type.DeclaringType);
 
 			if (res.IsMatch && (IsMatch(type.FullName, type) || IsMatch(type.Name, type))) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = type,
 					NameObject = type,
-					TypeImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(type),
 					LocationObject = type.DeclaringType,
-					LocationImageInfo = TypeTreeNode.GetImageInfo(type.DeclaringType, BackgroundType.Search),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(type.DeclaringType),
 					DnSpyFile = ownerModule,
 				});
 			}
@@ -595,53 +447,55 @@ namespace dnSpy.Search {
 			SearchMembers(ownerModule, type);
 		}
 
-		void SearchMembers(DnSpyFile ownerModule, TypeDef type) {
+		void SearchMembers(IDnSpyFile ownerModule, TypeDef type) {
 			foreach (var method in type.Methods)
 				Search(ownerModule, type, method);
-			cancellationToken.ThrowIfCancellationRequested();
+			options.CancellationToken.ThrowIfCancellationRequested();
 			foreach (var field in type.Fields)
 				Search(ownerModule, type, field);
-			cancellationToken.ThrowIfCancellationRequested();
+			options.CancellationToken.ThrowIfCancellationRequested();
 			foreach (var prop in type.Properties)
 				Search(ownerModule, type, prop);
-			cancellationToken.ThrowIfCancellationRequested();
+			options.CancellationToken.ThrowIfCancellationRequested();
 			foreach (var evt in type.Events)
 				Search(ownerModule, type, evt);
 		}
 
-		void Search(DnSpyFile ownerModule, TypeDef type, MethodDef method) {
-			var res = filter.GetFilterResult(method);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, TypeDef type, MethodDef method) {
+			var res = options.Filter.GetResult(method);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, method, type);
 
 			ImplMap im;
 			if (res.IsMatch && (IsMatch(method.Name, method) || ((im = method.ImplMap) != null && (IsMatch(im.Name, im) || IsMatch(im.Module == null ? null : im.Module.Name, null))))) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = method,
 					NameObject = method,
-					TypeImageInfo = MethodTreeNode.GetImageInfo(method, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(method),
 					LocationObject = type,
-					LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 					DnSpyFile = ownerModule,
 				});
 				return;
 			}
 
-			res = filter.GetFilterResultParamDefs(method);
-			if (res.FilterResult != FilterResult.Hidden) {
+			res = options.Filter.GetResultParamDefs(method);
+			if (res.FilterType != FilterType.Hide) {
 				foreach (var pd in method.ParamDefs) {
-					res = filter.GetFilterResult(method, pd);
-					if (res.FilterResult == FilterResult.Hidden)
+					CheckCustomAttributes(ownerModule, pd, method);
+					res = options.Filter.GetResult(method, pd);
+					if (res.FilterType == FilterType.Hide)
 						continue;
 					if (res.IsMatch && IsMatch(pd.Name, pd)) {
-						onMatch(new SearchResult {
-							Language = language,
+						options.OnMatch(new SearchResult {
+							Context = options.Context,
 							Object = method,
 							NameObject = method,
-							TypeImageInfo = MethodTreeNode.GetImageInfo(method, BackgroundType.Search),
+							ObjectImageReference = options.DotNetImageManager.GetImageReference(method),
 							LocationObject = type,
-							LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+							LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 							DnSpyFile = ownerModule,
 						});
 						return;
@@ -652,36 +506,27 @@ namespace dnSpy.Search {
 			SearchBody(ownerModule, type, method);
 		}
 
-		void SearchBody(DnSpyFile ownerModule, TypeDef type, MethodDef method) {
-			bool loadedBody;
-			SearchBody(ownerModule, type, method, out loadedBody);
-			if (loadedBody)
-				ICSharpCode.ILSpy.TreeNodes.Analyzer.Helpers.FreeMethodBody(method);
-		}
-
-		void SearchBody(DnSpyFile ownerModule, TypeDef type, MethodDef method, out bool loadedBody) {
-			loadedBody = false;
+		void SearchBody(IDnSpyFile ownerModule, TypeDef type, MethodDef method) {
 			CilBody body;
 
-			var res = filter.GetFilterResultLocals(method);
-			if (res.FilterResult != FilterResult.Hidden) {
+			var res = options.Filter.GetResultLocals(method);
+			if (res.FilterType != FilterType.Hide) {
 				body = method.Body;
 				if (body == null)
 					return; // Return immediately. All code here depends on a non-null body
-				loadedBody = true;
 
 				foreach (var local in body.Variables) {
-					res = filter.GetFilterResult(method, local);
-					if (res.FilterResult == FilterResult.Hidden)
+					res = options.Filter.GetResult(method, local);
+					if (res.FilterType == FilterType.Hide)
 						continue;
 					if (res.IsMatch && IsMatch(local.Name, local)) {
-						onMatch(new SearchResult {
-							Language = language,
+						options.OnMatch(new SearchResult {
+							Context = options.Context,
 							Object = method,
 							NameObject = method,
-							TypeImageInfo = MethodTreeNode.GetImageInfo(method, BackgroundType.Search),
+							ObjectImageReference = options.DotNetImageManager.GetImageReference(method),
 							LocationObject = type,
-							LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+							LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 							DnSpyFile = ownerModule,
 						});
 						return;
@@ -689,16 +534,15 @@ namespace dnSpy.Search {
 				}
 			}
 
-			res = filter.GetFilterResultBody(method);
-			if (res.FilterResult == FilterResult.Hidden)
+			res = options.Filter.GetResultBody(method);
+			if (res.FilterType == FilterType.Hide)
 				return;
 			if (!res.IsMatch)
 				return;
 
 			body = method.Body;
 			if (body == null)
-				return; // Return immediately. All code here depends on a non-null body
-			loadedBody = true;
+				return;
 			foreach (var instr in body.Instructions) {
 				object operand;
 				// Only check numbers and strings. Don't pass in any type of operand to IsMatch()
@@ -721,70 +565,74 @@ namespace dnSpy.Search {
 				default: operand = null; break;
 				}
 				if (operand != null && IsMatch(null, operand)) {
-					onMatch(new SearchResult {
-						Language = language,
+					options.OnMatch(new SearchResult {
+						Context = options.Context,
 						Object = method,
 						NameObject = method,
-						TypeImageInfo = MethodTreeNode.GetImageInfo(method, BackgroundType.Search),
+						ObjectImageReference = options.DotNetImageManager.GetImageReference(method),
 						LocationObject = type,
-						LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+						LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 						DnSpyFile = ownerModule,
+						ObjectInfo = new BodyResult(instr.Offset),
 					});
 					break;
 				}
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, TypeDef type, FieldDef field) {
-			var res = filter.GetFilterResult(field);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, TypeDef type, FieldDef field) {
+			var res = options.Filter.GetResult(field);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, field, type);
 
 			ImplMap im;
 			if (res.IsMatch && (IsMatch(field.Name, field) || ((im = field.ImplMap) != null && (IsMatch(im.Name, im) || IsMatch(im.Module == null ? null : im.Module.Name, null))))) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = field,
 					NameObject = field,
-					TypeImageInfo = FieldTreeNode.GetImageInfo(field, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(field),
 					LocationObject = type,
-					LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 					DnSpyFile = ownerModule,
 				});
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, TypeDef type, PropertyDef prop) {
-			var res = filter.GetFilterResult(prop);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, TypeDef type, PropertyDef prop) {
+			var res = options.Filter.GetResult(prop);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, prop, type);
 
 			if (res.IsMatch && IsMatch(prop.Name, prop)) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = prop,
 					NameObject = prop,
-					TypeImageInfo = PropertyTreeNode.GetImageInfo(prop, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(prop),
 					LocationObject = type,
-					LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 					DnSpyFile = ownerModule,
 				});
 			}
 		}
 
-		void Search(DnSpyFile ownerModule, TypeDef type, EventDef evt) {
-			var res = filter.GetFilterResult(evt);
-			if (res.FilterResult == FilterResult.Hidden)
+		void Search(IDnSpyFile ownerModule, TypeDef type, EventDef evt) {
+			var res = options.Filter.GetResult(evt);
+			if (res.FilterType == FilterType.Hide)
 				return;
+			CheckCustomAttributes(ownerModule, evt, type);
 
 			if (res.IsMatch && IsMatch(evt.Name, evt)) {
-				onMatch(new SearchResult {
-					Language = language,
+				options.OnMatch(new SearchResult {
+					Context = options.Context,
 					Object = evt,
 					NameObject = evt,
-					TypeImageInfo = EventTreeNode.GetImageInfo(evt, BackgroundType.Search),
+					ObjectImageReference = options.DotNetImageManager.GetImageReference(evt),
 					LocationObject = type,
-					LocationImageInfo = TypeTreeNode.GetImageInfo(type, BackgroundType.Search),
+					LocationImageReference = options.DotNetImageManager.GetImageReference(type),
 					DnSpyFile = ownerModule,
 				});
 			}

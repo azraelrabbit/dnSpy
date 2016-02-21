@@ -3,15 +3,16 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>8.0.30703</ProductVersion>
-    <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{6D647069-5C94-4388-AC0C-E059D125AC51}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>dnSpy.BamlDecompiler</RootNamespace>
     <AssemblyName>dnSpy.BamlDecompiler.Plugin</AssemblyName>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkProfile>Client</TargetFrameworkProfile>
     <FileAlignment>512</FileAlignment>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\dnSpy.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -21,6 +22,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <NoWarn>1685</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -29,6 +31,7 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <NoWarn>1685</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="PresentationCore" />
@@ -43,9 +46,17 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Annotations.cs" />
+    <Compile Include="BamlDecompiler.cs" />
+    <Compile Include="BamlTabSaverCreator.cs" />
+    <Compile Include="BamlToolTipContentCreator.cs" />
     <Compile Include="Baml\KnownThings.cs" />
     <Compile Include="Baml\KnownMembers.cs" />
     <None Include="Baml\KnownThings.gen.cs" />
+    <Compile Include="Properties\dnSpy.BamlDecompiler.Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>dnSpy.BamlDecompiler.Resources.resx</DependentUpon>
+    </Compile>
     <Compile Include="Handlers\Blocks\ConstructorParametersHandler.cs" />
     <Compile Include="Handlers\Blocks\PropertyArrayHandler.cs" />
     <Compile Include="Handlers\Blocks\KeyElementStartHandler.cs" />
@@ -82,6 +93,8 @@
     <Compile Include="IRewritePass.cs" />
     <Compile Include="IHandlers.cs" />
     <Compile Include="BamlSettings.cs" />
+    <Compile Include="MenuCommands.cs" />
+    <Compile Include="Plugin.cs" />
     <Compile Include="Rewrite\AttributeRewritePass.cs" />
     <Compile Include="Rewrite\ConnectionIdRewritePass.cs" />
     <Compile Include="Rewrite\MarkupExtensionRewritePass.cs" />
@@ -91,8 +104,8 @@
     <Compile Include="XamlDecompiler.cs" />
     <Compile Include="BamlDisassembler.cs" />
     <Compile Include="BamlElement.cs" />
-    <Compile Include="BamlResourceNode.cs" />
-    <Compile Include="BamlResourceNodeFactory.cs" />
+    <Compile Include="BamlResourceElementNode.cs" />
+    <Compile Include="BamlResourceNodeCreator.cs" />
     <Compile Include="Baml\BamlContext.cs" />
     <Compile Include="Baml\BamlDocument.cs" />
     <Compile Include="Baml\BamlNode.cs" />
@@ -112,40 +125,45 @@
     <Compile Include="XmlnsDictionary.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\AvalonEdit\ICSharpCode.AvalonEdit\ICSharpCode.AvalonEdit.csproj">
-      <Project>{6C55B776-26D4-4DB3-A6AB-87E783B2F3D1}</Project>
-      <Name>ICSharpCode.AvalonEdit</Name>
-    </ProjectReference>
     <ProjectReference Include="..\dnlib\src\dnlib.csproj">
-      <Project>{FDFC1237-143F-4919-8318-4926901F4639}</Project>
+      <Project>{fdfc1237-143f-4919-8318-4926901f4639}</Project>
       <Name>dnlib</Name>
     </ProjectReference>
+    <ProjectReference Include="..\dnSpy.Contracts\dnSpy.Contracts.csproj">
+      <Project>{9b234472-0e22-428c-9345-c8d9ee5e06af}</Project>
+      <Name>dnSpy.Contracts</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\dnSpy.Decompiler.Shared\dnSpy.Decompiler.Shared.csproj">
+      <Project>{a027546a-cf4b-47f9-bc53-ee1ad424ee41}</Project>
+      <Name>dnSpy.Decompiler.Shared</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\dnSpy.Shared\dnSpy.Shared.csproj">
+      <Project>{7e7c2cf8-2057-4eaa-9dad-ab3022cf4037}</Project>
+      <Name>dnSpy.Shared</Name>
+    </ProjectReference>
     <ProjectReference Include="..\ICSharpCode.Decompiler\ICSharpCode.Decompiler.csproj">
-      <Project>{984CC812-9470-4A13-AFF9-CC44068D666C}</Project>
+      <Project>{984cc812-9470-4a13-aff9-cc44068d666c}</Project>
       <Name>ICSharpCode.Decompiler</Name>
     </ProjectReference>
-    <ProjectReference Include="..\dnSpy\dnSpy.csproj">
-      <Project>{1E85EFF9-E370-4683-83E4-8A3D063FF791}</Project>
-      <Name>ILSpy</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\NRefactory2\ICSharpCode.NRefactory.CSharp\ICSharpCode.NRefactory.CSharp.csproj">
-      <Project>{53DCA265-3C3C-42F9-B647-F72BA678122B}</Project>
-      <Name>ICSharpCode.NRefactory.CSharp</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\NRefactory2\ICSharpCode.NRefactory\ICSharpCode.NRefactory.csproj">
-      <Project>{3B2A5653-EC97-4001-BB9B-D90F1AF2C371}</Project>
-      <Name>ICSharpCode.NRefactory</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\SharpTreeView\ICSharpCode.TreeView.csproj">
-      <Project>{DDE2A481-8271-4EAC-A330-8FA6A38D13D1}</Project>
-      <Name>ICSharpCode.TreeView</Name>
+    <ProjectReference Include="..\dnSpy.Languages\dnSpy.Languages.csproj">
+      <Project>{9265e4ea-eb00-4cb6-8a9a-608871e24fd0}</Project>
+      <Name>dnSpy.Languages</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="BamlSettings.xaml">
+    <Page Include="BamlSettings.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
-    </Resource>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Images\XamlFile.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Properties\dnSpy.BamlDecompiler.Resources.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>dnSpy.BamlDecompiler.Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

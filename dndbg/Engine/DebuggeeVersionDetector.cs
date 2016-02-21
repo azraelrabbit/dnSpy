@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -40,9 +40,9 @@ namespace dndbg.Engine {
 				IStream configStream = null;
 				const int STRING_LEN = 1024;
 				var sbVersion = new StringBuilder(STRING_LEN);
-				uint versionLength = (uint)sbVersion.MaxCapacity;
+				uint versionLength = (uint)sbVersion.Capacity;
 				var sbImageVersion = new StringBuilder(STRING_LEN);
-				uint imageVersionLength = (uint)sbImageVersion.MaxCapacity;
+				uint imageVersionLength = (uint)sbImageVersion.Capacity;
 				uint configFlags;
 				riid = typeof(ICLRRuntimeInfo).GUID;
 

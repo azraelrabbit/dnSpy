@@ -21,45 +21,20 @@
 */
 
 using System;
-using System.Threading;
-using System.Windows;
-using System.Xml.Linq;
-using ICSharpCode.ILSpy;
-using ICSharpCode.ILSpy.Options;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.Composition;
+using dnSpy.BamlDecompiler.Properties;
+using dnSpy.Contracts.Files.Tabs;
+using dnSpy.Contracts.Plugin;
+using dnSpy.Contracts.Settings;
+using dnSpy.Contracts.Settings.Dialog;
+using dnSpy.Shared.MVVM;
 
 namespace dnSpy.BamlDecompiler {
-	[ExportOptionPage(Title = "BAML", Order = 3)]
-	internal sealed class BamlSettingsCreator : IOptionPageCreator {
-		bool loaded = false;
-
-		public OptionPage Create() {
-			if (!loaded) {
-				var asmName = GetType().Assembly.FullName;
-				var src = new Uri("pack://application:,,,/" + asmName + ";component/BamlSettings.xaml", UriKind.RelativeOrAbsolute);
-				Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary {
-					Source = src
-				});
-				loaded = true;
-			}
-			return new BamlSettings();
+	class BamlSettings : ViewModelBase {
+		protected virtual void OnModified() {
 		}
-	}
-
-	public sealed class BamlSettings : OptionPage {
-		static BamlSettings settings;
-
-		public static BamlSettings Instance {
-			get {
-				if (settings != null)
-					return settings;
-				var s = new BamlSettings();
-				s.Load(DNSpySettings.Load());
-				Interlocked.CompareExchange(ref settings, s, null);
-				return settings;
-			}
-		}
-
-		bool disassembleBaml;
 
 		public bool DisassembleBaml {
 			get { return disassembleBaml; }
@@ -67,34 +42,104 @@ namespace dnSpy.BamlDecompiler {
 				if (disassembleBaml != value) {
 					disassembleBaml = value;
 					OnPropertyChanged("DisassembleBaml");
+					OnModified();
 				}
 			}
 		}
+		bool disassembleBaml;
 
-		const string SETTINGS_SECTION_NAME = "BamlSettings";
-
-		public override void Load(DNSpySettings settings) {
-			var xelem = settings[SETTINGS_SECTION_NAME];
-			DisassembleBaml = (bool?)xelem.Attribute("DisassembleBaml") ?? false;
+		public BamlSettings Clone() {
+			return CopyTo(new BamlSettings());
 		}
 
-		public override RefreshFlags Save(XElement root) {
-			var xelem = new XElement(SETTINGS_SECTION_NAME);
-			xelem.SetAttributeValue("DisassembleBaml", DisassembleBaml);
+		public BamlSettings CopyTo(BamlSettings other) {
+			other.DisassembleBaml = this.DisassembleBaml;
+			return other;
+		}
+	}
 
-			var currElem = root.Element(SETTINGS_SECTION_NAME);
-			if (currElem != null)
-				currElem.ReplaceWith(xelem);
-			else
-				root.Add(xelem);
+	[Export, PartCreationPolicy(CreationPolicy.Shared)]
+	sealed class BamlSettingsImpl : BamlSettings {
+		static readonly Guid SETTINGS_GUID = new Guid("D9809EB3-1605-4E05-A84F-6EE241FAAD6C");
 
-			WriteTo(Instance);
+		readonly ISettingsManager settingsManager;
 
-			return RefreshFlags.None;
+		[ImportingConstructor]
+		BamlSettingsImpl(ISettingsManager settingsManager) {
+			this.settingsManager = settingsManager;
+
+			this.disableSave = true;
+			var sect = settingsManager.GetOrCreateSection(SETTINGS_GUID);
+			this.DisassembleBaml = sect.Attribute<bool?>("DisassembleBaml") ?? this.DisassembleBaml;
+			this.disableSave = false;
+		}
+		readonly bool disableSave;
+
+		protected override void OnModified() {
+			if (disableSave)
+				return;
+			var sect = settingsManager.RecreateSection(SETTINGS_GUID);
+			sect.Attribute("DisassembleBaml", DisassembleBaml);
+		}
+	}
+
+	// This is disabled for now since it only contains one option that can be modified in the text
+	// editor by using the context menu. Enable again when more options are added.
+	// [Export(typeof(IAppSettingsTabCreator))]
+	sealed class BamlSettingsTabCreator : IAppSettingsTabCreator {
+		readonly BamlSettingsImpl bamlSettings;
+
+		[ImportingConstructor]
+		BamlSettingsTabCreator(BamlSettingsImpl bamlSettings) {
+			this.bamlSettings = bamlSettings;
 		}
 
-		void WriteTo(BamlSettings other) {
-			other.DisassembleBaml = DisassembleBaml;
+		public IEnumerable<IAppSettingsTab> Create() {
+			yield return new BamlAppSettingsTab(bamlSettings);
+		}
+	}
+
+	sealed class BamlAppSettingsTab : IAppSettingsTab {
+		public double Order {
+			get { return AppSettingsConstants.ORDER_BAML_TAB_DISPLAY; }
+		}
+
+		public string Title {
+			get { return dnSpy_BamlDecompiler_Resources.BamlOptionDlgTab; }
+		}
+
+		public object UIObject {
+			get { return bamlSettings; }
+		}
+
+		readonly BamlSettingsImpl _global_settings;
+		readonly BamlSettings bamlSettings;
+
+		public BamlAppSettingsTab(BamlSettingsImpl _global_settings) {
+			this._global_settings = _global_settings;
+			this.bamlSettings = _global_settings.Clone();
+		}
+
+		public void OnClosed(bool saveSettings, IAppRefreshSettings appRefreshSettings) {
+			if (!saveSettings)
+				return;
+			bamlSettings.CopyTo(_global_settings);
+		}
+	}
+
+	[ExportAutoLoaded]
+	sealed class BamlRefresher : IAutoLoaded {
+		readonly IFileTabManager fileTabManager;
+
+		[ImportingConstructor]
+		BamlRefresher(BamlSettingsImpl bamlSettings, IFileTabManager fileTabManager) {
+			this.fileTabManager = fileTabManager;
+			bamlSettings.PropertyChanged += BamlSettings_PropertyChanged;
+		}
+
+		void BamlSettings_PropertyChanged(object sender, PropertyChangedEventArgs e) {
+			if (e.PropertyName == "DisassembleBaml")
+				fileTabManager.Refresh<BamlResourceElementNode>();
 		}
 	}
 }

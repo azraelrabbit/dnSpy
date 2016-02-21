@@ -3,7 +3,7 @@
 
 using System;
 using System.IO;
-using dnSpy.NRefactory;
+using dnSpy.Decompiler.Shared;
 
 namespace ICSharpCode.NRefactory.VB {
 	/// <summary>
@@ -22,7 +22,7 @@ namespace ICSharpCode.NRefactory.VB {
 			this.textWriter = textWriter;
 		}
 		
-		public void WriteIdentifier(string ident, TextTokenType tokenType)
+		public void WriteIdentifier(string ident, TextTokenKind tokenKind)
 		{
 			WriteIndentation();
 			textWriter.Write(ident);
@@ -34,7 +34,7 @@ namespace ICSharpCode.NRefactory.VB {
 			textWriter.Write(keyword);
 		}
 		
-		public void WriteToken(string token, TextTokenType tokenType)
+		public void WriteToken(string token, TextTokenKind tokenKind)
 		{
 			WriteIndentation();
 			textWriter.Write(token);
@@ -88,14 +88,6 @@ namespace ICSharpCode.NRefactory.VB {
 			else
 				textWriter.Write("'");
 			textWriter.WriteLine(content);
-		}
-		
-		public void MarkFoldStart()
-		{
-		}
-		
-		public void MarkFoldEnd()
-		{
 		}
 
 		public void DebugHidden(object hiddenILRanges)

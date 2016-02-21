@@ -1,5 +1,5 @@
 ﻿/*
-    Copyright (C) 2014-2015 de4dot@gmail.com
+    Copyright (C) 2014-2016 de4dot@gmail.com
 
     This file is part of dnSpy
 
@@ -19,17 +19,19 @@
 
 using System.IO;
 using dnlib.DotNet;
+using dnlib.PE;
 
 namespace ICSharpCode.Decompiler.Tests
 {
 	static class Utils
 	{
-		public static AssemblyDef OpenAssembly(string filename)
+		public static ModuleDefMD OpenModule(string filename)
 		{
 			var ctx = ModuleDefMD.CreateModuleContext();
-			var asm = ModuleDefMD.Load(File.ReadAllBytes(filename), ctx).Assembly;
-			ctx.AssemblyResolver.AddToCache(asm);
-			return asm;
+			var peImage = new PEImage(File.ReadAllBytes(filename), filename);
+			var mod = ModuleDefMD.Load(peImage, ctx);
+			ctx.AssemblyResolver.AddToCache(mod);
+			return mod;
 		}
 	}
 }
